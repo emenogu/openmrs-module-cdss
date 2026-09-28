@@ -1,0 +1,89 @@
+name: NMHS G5 CDSS mg validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - g5-cdss-mg-dose-unit-v1-hosted-validation-v1
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout exact control branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      - name: Prove provenance and patch scope
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SOURCE_COMMIT='1f8892076da69a923c00b63d2c1bf13255f225f3'
+          UPSTREAM_COMMIT='33abe29eea8bcd9769f29b5b86d94600f3e4003f'
+
+          test "$(git rev-parse HEAD^)" = "$SOURCE_COMMIT"
+          test "$(git rev-parse "${SOURCE_COMMIT}^")" = "$UPSTREAM_COMMIT"
+
+          actual="$(
+            git diff-tree \
+              --no-commit-id \
+              --name-only \
+              -r "$SOURCE_COMMIT" |
+            sort
+          )"
+
+          expected="$(
+            printf '%s\n' \
+              'api/src/main/java/org/bahmni/module/fhircdss/api/util/DosageUnitMapper.java' \
+              'api/src/test/java/org/bahmni/module/fhircdss/api/util/DosageUnitMapperTest.java' |
+            sort
+          )"
+
+          test "$actual" = "$expected"
+
+          grep -F \
+            'MG_MG("mg", "mg"),' \
+            api/src/main/java/org/bahmni/module/fhircdss/api/util/DosageUnitMapper.java
+
+          grep -F \
+            'assertEquals("mg", DosageUnitMapper.getTargetUnit("mg"));' \
+            api/src/test/java/org/bahmni/module/fhircdss/api/util/DosageUnitMapperTest.java
+
+          echo "NMHS_CDSS_MG_PROVENANCE=PASS"
+
+      - name: Make Maven wrapper executable
+        run: chmod +x ./mvnw
+
+      - name: Run focused mg regression test
+        run: >
+          ./mvnw
+          -B
+          -ntp
+          -pl api
+          -Dtest=DosageUnitMapperTest
+          test
+
+      - name: Run full API module tests
+        run: >
+          ./mvnw
+          -B
+          -ntp
+          -pl api
+          test
+
+      - name: Validation marker
+        run: echo "NMHS_G5_CDSS_MG_HOSTED_VALIDATION=PASS"
