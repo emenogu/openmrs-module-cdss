@@ -1,0 +1,340 @@
+name: UPSTREAM-002 Gate C OpenMRS CDSS Image Publication V1
+
+"on":
+  push:
+    branches:
+      - upstream-002-gate-c-cdss-openmrs-image-v1-publication
+
+permissions:
+  contents: read
+  actions: read
+  packages: write
+
+concurrency:
+  group: upstream-002-gate-c-openmrs-cdss-image-v1
+  cancel-in-progress: false
+
+env:
+  CONTROL_BASE: 8b6a3841194036f2c43c92561f154fcb4bbfa4ce
+  WORKFLOW_PATH: .github/workflows/upstream-002-gate-c-cdss-openmrs-image-v1-publication.yml
+
+  OMOD_RUN_ID: "37414507922"
+  OMOD_ARTIFACT_NAME: upstream-002-gate-c-cdss-2.0.0-mg-backport-4e6c2e9cbfea
+  OMOD_NAME: fhir-cdss-int-2.0.0.omod
+  OMOD_SHA256: b691864db756215fb928988e568c21f1f18bc25963f003e2ebd9a861fbf35f70
+
+  PARENT_IMAGE: ghcr.io/emenogu/nmhs-openmrs-control2@sha256:64af618d9aa9de190709a22dbee7940d832b82cf6665a5ed5de6598a4d0cfaf9
+  IMAGE_REPOSITORY: ghcr.io/emenogu/nmhs-openmrs-cdss-gate-c
+  IMAGE_TAG: upstream-002-gate-c-cdss-2.0.0-mg-4e6c2e9cbfea
+
+jobs:
+  publish:
+    name: Build and publish bounded OpenMRS CDSS derivative
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout exact publication control
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Verify publication-control lineage and scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          git merge-base --is-ancestor "$CONTROL_BASE" HEAD
+
+          actual="$(
+            git diff               --name-only               "$CONTROL_BASE"               HEAD |
+            LC_ALL=C sort
+          )"
+
+          expected="$(
+            printf '%s\n' "$WORKFLOW_PATH" |
+            LC_ALL=C sort
+          )"
+
+          test "$actual" = "$expected"
+          git diff "$CONTROL_BASE" HEAD --check
+
+          echo "PUBLICATION_CONTROL_SCOPE=PASS"
+          echo "PUBLICATION_CONTROL_HEAD=$(git rev-parse HEAD)"
+
+      - name: Download exact validated OMOD artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: ${{ env.OMOD_ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/omod-artifact
+          repository: emenogu/openmrs-module-cdss
+          run-id: ${{ env.OMOD_RUN_ID }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify exact OMOD artifact
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          cd "$RUNNER_TEMP/omod-artifact"
+
+          test -f "$OMOD_NAME"
+          test -f SHA256SUMS
+
+          actual_sha="$(
+            sha256sum "$OMOD_NAME" |
+            awk '{print $1}'
+          )"
+
+          test "$actual_sha" = "$OMOD_SHA256"
+
+          expected_line="$OMOD_SHA256  $OMOD_NAME"
+          test "$(cat SHA256SUMS)" = "$expected_line"
+
+          echo "OMOD_ARTIFACT_PROVENANCE=PASS"
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+          logout: false
+
+      - name: Verify immutable target tag absent
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          repository = os.environ["IMAGE_REPOSITORY"].removeprefix("ghcr.io/")
+          tag = os.environ["IMAGE_TAG"]
+          actor = os.environ["GITHUB_ACTOR"]
+          secret = os.environ["GH_TOKEN"]
+
+          basic = base64.b64encode(f"{actor}:{secret}".encode()).decode()
+          query = urllib.parse.urlencode({
+              "service": "ghcr.io",
+              "scope": f"repository:{repository}:pull",
+          })
+
+          token_request = urllib.request.Request(
+              "https://ghcr.io/token?" + query,
+              headers={"Authorization": "Basic " + basic},
+          )
+
+          with urllib.request.urlopen(token_request, timeout=60) as response:
+              token = json.load(response).get("token")
+
+          if not isinstance(token, str) or not token:
+              raise SystemExit("ERROR: no registry token")
+
+          manifest_request = urllib.request.Request(
+              f"https://ghcr.io/v2/{repository}/manifests/{tag}",
+              headers={
+                  "Authorization": "Bearer " + token,
+                  "Accept": (
+                      "application/vnd.oci.image.manifest.v1+json,"
+                      "application/vnd.docker.distribution.manifest.v2+json"
+                  ),
+              },
+          )
+
+          try:
+              with urllib.request.urlopen(manifest_request, timeout=60):
+                  raise SystemExit("ERROR: immutable target tag already exists")
+          except urllib.error.HTTPError as error:
+              if error.code != 404:
+                  raise
+
+          print("IMMUTABLE_TARGET_TAG_ABSENT=PASS")
+          PY
+
+      - name: Pull and inspect exact parent image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          docker pull "$PARENT_IMAGE"
+
+          docker image inspect "$PARENT_IMAGE"             --format '{{range .RepoDigests}}{{println .}}{{end}}' |
+          grep -Fx "$PARENT_IMAGE"
+
+          test "$(
+            docker image inspect "$PARENT_IMAGE"               --format '{{.Os}}/{{.Architecture}}'
+          )" = "linux/amd64"
+
+          base_user="$(
+            docker image inspect "$PARENT_IMAGE"               --format '{{.Config.User}}'
+          )"
+
+          printf 'BASE_USER=%s\n' "$base_user" >> "$GITHUB_ENV"
+
+          mapfile -t current_cdss < <(
+            docker run               --rm               --network none               --read-only               --entrypoint /bin/sh               "$PARENT_IMAGE"               -ec '
+                find /openmrs/data/modules                   -maxdepth 1                   -type f                   -name "fhir-cdss-int-*.omod"                   -print
+              '
+          )
+
+          test "${#current_cdss[@]}" -eq 1
+
+          printf 'PARENT_CDSS_OMOD=%s\n' "${current_cdss[0]}"
+
+          docker run             --rm             --network none             --read-only             --entrypoint /bin/sh             "$PARENT_IMAGE"             -ec '
+              find /openmrs/data/modules                 -maxdepth 1                 -type f                 ! -name "fhir-cdss-int-*.omod"                 -exec sha256sum {} \; |
+              sed "s#  /openmrs/data/modules/#  #" |
+              LC_ALL=C sort
+            ' > "$RUNNER_TEMP/parent-modules.sha256"
+
+          docker image inspect "$PARENT_IMAGE"             --format '{{json .RootFS.Layers}}'             > "$RUNNER_TEMP/parent-rootfs.json"
+
+          echo "PARENT_IMAGE_PROVENANCE=PASS"
+
+      - name: Construct bounded derivative image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          context="$RUNNER_TEMP/openmrs-cdss-context"
+          target="$IMAGE_REPOSITORY:$IMAGE_TAG"
+
+          mkdir -p "$context"
+          cp "$RUNNER_TEMP/omod-artifact/$OMOD_NAME" "$context/$OMOD_NAME"
+
+          {
+            printf 'FROM %s\n' "$PARENT_IMAGE"
+            printf 'USER root\n'
+            printf '%s\n' \
+              'RUN set -eux; old="$(find /openmrs/data/modules -maxdepth 1 -type f -name '"'"'fhir-cdss-int-*.omod'"'"' -print)"; test "$(printf '"'"'%s\\n'"'"' "$old" | sed '"'"'/^$/d'"'"' | wc -l)" -eq 1; rm -f "$old"'
+            printf 'COPY %s /openmrs/data/modules/%s\n' "$OMOD_NAME" "$OMOD_NAME"
+            if [ -n "$BASE_USER" ]; then
+              printf 'USER %s\n' "$BASE_USER"
+            fi
+          } > "$context/Dockerfile"
+
+          docker build             --pull=false             --network=none             --platform linux/amd64             --tag "$target"             --file "$context/Dockerfile"             "$context"
+
+          test "$(
+            docker image inspect "$target"               --format '{{.Config.User}}'
+          )" = "$BASE_USER"
+
+          test "$(
+            docker image inspect "$target"               --format '{{.Os}}/{{.Architecture}}'
+          )" = "linux/amd64"
+
+          echo "DERIVATIVE_IMAGE_BUILD=PASS"
+
+      - name: Verify bounded module replacement and rootfs lineage
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          target="$IMAGE_REPOSITORY:$IMAGE_TAG"
+
+          mapfile -t candidate_cdss < <(
+            docker run               --rm               --network none               --read-only               --entrypoint /bin/sh               "$target"               -ec '
+                find /openmrs/data/modules                   -maxdepth 1                   -type f                   -name "fhir-cdss-int-*.omod"                   -print
+              '
+          )
+
+          test "${#candidate_cdss[@]}" -eq 1
+          test "${candidate_cdss[0]}" = "/openmrs/data/modules/$OMOD_NAME"
+
+          test "$(
+            docker run               --rm               --network none               --read-only               --entrypoint /bin/sh               "$target"               -ec "sha256sum /openmrs/data/modules/$OMOD_NAME | awk '{print \\$1}'"
+          )" = "$OMOD_SHA256"
+
+          docker run             --rm             --network none             --read-only             --entrypoint /bin/sh             "$target"             -ec '
+              find /openmrs/data/modules                 -maxdepth 1                 -type f                 ! -name "fhir-cdss-int-*.omod"                 -exec sha256sum {} \; |
+              sed "s#  /openmrs/data/modules/#  #" |
+              LC_ALL=C sort
+            ' > "$RUNNER_TEMP/candidate-modules.sha256"
+
+          cmp             "$RUNNER_TEMP/parent-modules.sha256"             "$RUNNER_TEMP/candidate-modules.sha256"
+
+          docker image inspect "$target"             --format '{{json .RootFS.Layers}}'             > "$RUNNER_TEMP/candidate-rootfs.json"
+
+          python3 -             "$RUNNER_TEMP/parent-rootfs.json"             "$RUNNER_TEMP/candidate-rootfs.json" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              parent = json.load(handle)
+          with open(sys.argv[2], encoding="utf-8") as handle:
+              candidate = json.load(handle)
+
+          if candidate[:len(parent)] != parent:
+              raise SystemExit("ERROR: parent rootfs is not an exact candidate prefix")
+
+          if len(candidate) <= len(parent):
+              raise SystemExit("ERROR: derivative added no rootfs layer")
+
+          print(f"PARENT_LAYER_COUNT={len(parent)}")
+          print(f"CANDIDATE_LAYER_COUNT={len(candidate)}")
+          print("ROOTFS_LINEAGE=PASS")
+          PY
+
+          echo "NON_CDSS_MODULES_IDENTICAL=PASS"
+          echo "CDSS_MODULE_REPLACEMENT=PASS"
+
+      - name: Publish immutable derivative
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          target="$IMAGE_REPOSITORY:$IMAGE_TAG"
+
+          docker push "$target"
+
+          digest="$(
+            docker image inspect "$target"               --format '{{index .RepoDigests 0}}'
+          )"
+
+          case "$digest" in
+            "$IMAGE_REPOSITORY@sha256:"*)
+              ;;
+            *)
+              echo "ERROR: unexpected immutable digest: $digest" >&2
+              exit 1
+              ;;
+          esac
+
+          echo "PUBLISHED_IMAGE=$digest"
+          echo "PUBLISHED_IMAGE=$digest" >> "$GITHUB_ENV"
+
+      - name: Verify published immutable derivative
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          docker pull "$PUBLISHED_IMAGE"
+
+          test "$(
+            docker run               --rm               --network none               --read-only               --entrypoint /bin/sh               "$PUBLISHED_IMAGE"               -ec "sha256sum /openmrs/data/modules/$OMOD_NAME | awk '{print \\$1}'"
+          )" = "$OMOD_SHA256"
+
+          echo "PUBLISHED_IMAGE_VERIFICATION=PASS"
+
+      - name: Final publication summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "GATE=UPSTREAM-002-GATE-C-CDSS"
+          echo "PARENT_IMAGE=$PARENT_IMAGE"
+          echo "OMOD_RUN_ID=$OMOD_RUN_ID"
+          echo "OMOD_SHA256=$OMOD_SHA256"
+          echo "PUBLISHED_IMAGE=$PUBLISHED_IMAGE"
+          echo "NON_CDSS_MODULES_IDENTICAL=PASS"
+          echo "HOSTED_OPENMRS_DERIVATIVE_PUBLICATION=PASS"
+          echo "REHEARSAL_MUTATED=NO"
+          echo "PRODUCTION_MUTATED=NO"
