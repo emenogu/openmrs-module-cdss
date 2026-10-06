@@ -1,0 +1,127 @@
+name: UPSTREAM-002 Gate C CDSS mg 2.0.0 Backport Publication V1
+
+"on":
+  push:
+    branches:
+      - upstream-002-gate-c-cdss-mg-2.0.0-backport-v1-publication
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-002-gate-c-cdss-mg-2.0.0-backport-v1-publication
+  cancel-in-progress: false
+
+env:
+  VALIDATED_COMMIT: d72f1d2a9bf3349216d5b2676f8c48166d4d1139
+  VALIDATED_TREE: 3639b9623137652ee1841e436a1c7c43f52ef170
+  VALIDATION_RUN: "37412623950"
+  IMPLEMENTATION_COMMIT: 4e6c2e9cbfea5f737b73a615a107be91e985506c
+  IMPLEMENTATION_TREE: 2c65e2fc1a145cb5f1679f5e9312eb0e6dfbd1ac
+  EXPECTED_OMOD_SHA256: b62ba6a8a250fe435224d393677f2dcbc1c2c310dce0658f2c03f49c7d20dccd
+  OMOD_NAME: fhir-cdss-int-2.0.0.omod
+  ARTIFACT_NAME: upstream-002-gate-c-cdss-2.0.0-mg-backport-4e6c2e9cbfea
+
+jobs:
+  publish:
+    name: Publish exact validated CDSS OMOD artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout exact publication control
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+
+      - name: Verify publication-control scope
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          test "$(git rev-parse HEAD^)" = "$VALIDATED_COMMIT"
+          test "$(git rev-parse "$VALIDATED_COMMIT^{tree}")" = "$VALIDATED_TREE"
+
+          actual="$(
+            git diff               --name-only               "$VALIDATED_COMMIT"               HEAD |
+            LC_ALL=C sort
+          )"
+
+          expected="$(
+            printf '%s\n'               '.github/workflows/upstream-002-gate-c-cdss-mg-2.0.0-backport-v1-publication.yml' |
+            LC_ALL=C sort
+          )"
+
+          test "$actual" = "$expected"
+          git diff "$VALIDATED_COMMIT" HEAD --check
+
+          test "$(git rev-parse "$IMPLEMENTATION_COMMIT^{tree}")" = "$IMPLEMENTATION_TREE"
+
+          echo "PUBLICATION_SCOPE=PASS"
+          echo "VALIDATION_RUN=$VALIDATION_RUN"
+
+      - name: Set up Java 8
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      - name: Make Maven wrapper executable
+        run: chmod +x ./mvnw
+
+      - name: Build exact validated OMOD
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          git checkout --detach "$IMPLEMENTATION_COMMIT"
+
+          ./mvnw             -B             -ntp             -DskipTests             package
+
+          OMOD="omod/target/$OMOD_NAME"
+
+          test -f "$OMOD"
+
+          actual_sha="$(
+            sha256sum "$OMOD" |
+            awk '{print $1}'
+          )"
+
+          printf 'OMOD_SHA256=%s\n' "$actual_sha"
+
+          test "$actual_sha" = "$EXPECTED_OMOD_SHA256"
+
+          mkdir -p "$RUNNER_TEMP/publication"
+
+          cp "$OMOD" "$RUNNER_TEMP/publication/$OMOD_NAME"
+
+          printf '%s  %s\n'             "$EXPECTED_OMOD_SHA256"             "$OMOD_NAME"             > "$RUNNER_TEMP/publication/SHA256SUMS"
+
+          echo "EXACT_OMOD_REBUILD=PASS"
+
+      - name: Upload immutable validation artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            ${{ runner.temp }}/publication/${{ env.OMOD_NAME }}
+            ${{ runner.temp }}/publication/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
+      - name: Final publication summary
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "GATE=UPSTREAM-002-GATE-C-CDSS"
+          echo "CLASSIFICATION=RELEASED-2.0.0-PLUS-BOUNDED-BACKPORT"
+          echo "IMPLEMENTATION_COMMIT=$IMPLEMENTATION_COMMIT"
+          echo "OMOD_NAME=$OMOD_NAME"
+          echo "OMOD_SHA256=$EXPECTED_OMOD_SHA256"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME"
+          echo "HOSTED_PUBLICATION=PASS"
+          echo "REHEARSAL_MUTATED=NO"
+          echo "PRODUCTION_MUTATED=NO"
