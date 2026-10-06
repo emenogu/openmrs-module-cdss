@@ -15,6 +15,7 @@ concurrency:
 env:
   VALIDATED_COMMIT: d72f1d2a9bf3349216d5b2676f8c48166d4d1139
   VALIDATED_TREE: 3639b9623137652ee1841e436a1c7c43f52ef170
+  PUBLICATION_ROOT: e2200c0d43158f053ce886e8052ee7b8ae1f5c46
   VALIDATION_RUN: "37412623950"
   IMPLEMENTATION_COMMIT: 4e6c2e9cbfea5f737b73a615a107be91e985506c
   IMPLEMENTATION_TREE: 2c65e2fc1a145cb5f1679f5e9312eb0e6dfbd1ac
@@ -38,8 +39,11 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          test "$(git rev-parse HEAD^)" = "$VALIDATED_COMMIT"
           test "$(git rev-parse "$VALIDATED_COMMIT^{tree}")" = "$VALIDATED_TREE"
+          test "$(git rev-parse "$PUBLICATION_ROOT^")" = "$VALIDATED_COMMIT"
+
+          git merge-base --is-ancestor "$VALIDATED_COMMIT" HEAD
+          git merge-base --is-ancestor "$PUBLICATION_ROOT" HEAD
 
           actual="$(
             git diff               --name-only               "$VALIDATED_COMMIT"               HEAD |
@@ -57,6 +61,8 @@ jobs:
           test "$(git rev-parse "$IMPLEMENTATION_COMMIT^{tree}")" = "$IMPLEMENTATION_TREE"
 
           echo "PUBLICATION_SCOPE=PASS"
+          echo "PUBLICATION_ROOT=$PUBLICATION_ROOT"
+          echo "PUBLICATION_HEAD=$(git rev-parse HEAD)"
           echo "VALIDATION_RUN=$VALIDATION_RUN"
 
       - name: Set up Java 8
