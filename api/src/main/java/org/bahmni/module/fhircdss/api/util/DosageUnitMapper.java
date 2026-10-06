@@ -7,6 +7,7 @@ public enum DosageUnitMapper {
 
     L_L("l", "L"),
     ML_ML("ml", "mL"),
+    MG_MG("mg", "mg"),
     UL_UL("ul", "uL"),
     TABLETS_TABLET("Tablet(s)", "Tablet"),
     TABLET_TABLET("Tablet", "Tablet"),
