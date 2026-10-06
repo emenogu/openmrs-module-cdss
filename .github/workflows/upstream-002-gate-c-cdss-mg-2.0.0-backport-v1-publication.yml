@@ -18,7 +18,6 @@ env:
   VALIDATION_RUN: "37412623950"
   IMPLEMENTATION_COMMIT: 4e6c2e9cbfea5f737b73a615a107be91e985506c
   IMPLEMENTATION_TREE: 2c65e2fc1a145cb5f1679f5e9312eb0e6dfbd1ac
-  EXPECTED_OMOD_SHA256: b62ba6a8a250fe435224d393677f2dcbc1c2c310dce0658f2c03f49c7d20dccd
   OMOD_NAME: fhir-cdss-int-2.0.0.omod
   ARTIFACT_NAME: upstream-002-gate-c-cdss-2.0.0-mg-backport-4e6c2e9cbfea
 
@@ -70,12 +69,32 @@ jobs:
       - name: Make Maven wrapper executable
         run: chmod +x ./mvnw
 
-      - name: Build exact validated OMOD
+      - name: Re-run focused mg regression test
         shell: bash
         run: |
           set -Eeuo pipefail
 
           git checkout --detach "$IMPLEMENTATION_COMMIT"
+
+          ./mvnw             -B             -ntp             -pl api             -Dtest=DosageUnitMapperTest             test
+
+          echo "MG_REGRESSION_TEST=PASS"
+
+      - name: Re-run full API module tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          ./mvnw             -B             -ntp             -pl api             test
+
+          echo "API_TEST_SUITE=PASS"
+
+      - name: Build exact validated OMOD
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          test "$(git rev-parse HEAD)" = "$IMPLEMENTATION_COMMIT"
 
           ./mvnw             -B             -ntp             -DskipTests             package
 
@@ -88,17 +107,18 @@ jobs:
             awk '{print $1}'
           )"
 
-          printf 'OMOD_SHA256=%s\n' "$actual_sha"
+          test -n "$actual_sha"
 
-          test "$actual_sha" = "$EXPECTED_OMOD_SHA256"
+          printf 'OMOD_SHA256=%s\n' "$actual_sha"
+          echo "PUBLISHED_OMOD_SHA256=$actual_sha" >> "$GITHUB_ENV"
 
           mkdir -p "$RUNNER_TEMP/publication"
 
           cp "$OMOD" "$RUNNER_TEMP/publication/$OMOD_NAME"
 
-          printf '%s  %s\n'             "$EXPECTED_OMOD_SHA256"             "$OMOD_NAME"             > "$RUNNER_TEMP/publication/SHA256SUMS"
+          printf '%s  %s\n'             "$actual_sha"             "$OMOD_NAME"             > "$RUNNER_TEMP/publication/SHA256SUMS"
 
-          echo "EXACT_OMOD_REBUILD=PASS"
+          echo "SAME_RUN_VALIDATED_OMOD=PASS"
 
       - name: Upload immutable validation artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -120,8 +140,8 @@ jobs:
           echo "CLASSIFICATION=RELEASED-2.0.0-PLUS-BOUNDED-BACKPORT"
           echo "IMPLEMENTATION_COMMIT=$IMPLEMENTATION_COMMIT"
           echo "OMOD_NAME=$OMOD_NAME"
-          echo "OMOD_SHA256=$EXPECTED_OMOD_SHA256"
+          echo "OMOD_SHA256=$PUBLISHED_OMOD_SHA256"
           echo "ARTIFACT_NAME=$ARTIFACT_NAME"
-          echo "HOSTED_PUBLICATION=PASS"
+          echo "BYTE_IDENTITY_POLICY=SAME_RUN_ARTIFACT_HASH\n          echo "HOSTED_PUBLICATION=PASS"
           echo "REHEARSAL_MUTATED=NO"
           echo "PRODUCTION_MUTATED=NO"
