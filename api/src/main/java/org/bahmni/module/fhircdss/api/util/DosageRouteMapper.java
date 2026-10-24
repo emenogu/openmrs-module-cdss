@@ -18,7 +18,9 @@ public enum DosageRouteMapper {
     PERVAGINAL_VAGINAL("Per Vaginal" , "V"),
     ORAL_ORAL("Oral" , "O"),
     INTRAVENOUS_PARENTERAL("Intravenous" , "P"),
-    INHALATION_INHAL("Inhalation" , "Inhal");
+    INHALATION_INHAL("Inhalation" , "Inhal"),
+    // NMHS CDSS-HDA-002: Bahmni/NMHS route concept name for rectal administration.
+    PER_RECTUM_RECTUM("Per Rectum" , "R");
     private static final Map<String, String> BY_UNIT = new HashMap<>();
 
     static {

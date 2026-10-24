@@ -146,7 +146,7 @@ public class MedicationRequestBuilder implements RequestBuilder<Bundle> {
     private void resolveDoseUnit(Dosage dosage) {
         Dosage.DosageDoseAndRateComponent dosageDoseAndRateComponent = dosage.getDoseAndRate().get(0);
         Quantity doseQuantity = dosageDoseAndRateComponent.getDoseQuantity();
-        String doseUnit = DosageUnitMapper.getTargetUnit(doseQuantity.getUnit());
+        String doseUnit = DosageUnitMapper.getTargetUnit(doseQuantity.getUnit(), doseQuantity.getSystem(), doseQuantity.getCode());
         if(doseUnit == null) {
             doseQuantity.setUnit("NA");
             return;
