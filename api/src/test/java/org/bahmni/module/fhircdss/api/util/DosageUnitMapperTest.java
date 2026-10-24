@@ -35,9 +35,16 @@ public class DosageUnitMapperTest {
     }
 
     @Test
+    public void shouldMapInternationalUnitsAndUnit() {
+        assertEquals("IU", DosageUnitMapper.getTargetUnit("International units", null, null));
+        assertEquals("IU", DosageUnitMapper.getTargetUnit(null, DosageUnitMapper.UCUM_SYSTEM, "[iU]"));
+        assertEquals("Unit", DosageUnitMapper.getTargetUnit("Unit", null, null));
+        assertEquals("Capsule", DosageUnitMapper.getTargetUnit("Unit(s)", null, null));
+    }
+
+    @Test
     public void shouldKeepUnsupportedUnitsUnmapped() {
-        assertNull(DosageUnitMapper.getTargetUnit("International units", null, null));
-        assertNull(DosageUnitMapper.getTargetUnit("Unit", null, null));
+        assertNull(DosageUnitMapper.getTargetUnit("Sachet", null, null));
     }
 
     @Test

@@ -26,7 +26,12 @@ public enum DosageUnitMapper {
     MICROGRAM_MCG("Microgram", "mcg"),
     MCG_MCG("mcg", "mcg"),
     G_G("g", "g"),
-    PUFF_ACTUATION("Puff", "Actuation");
+    PUFF_ACTUATION("Puff", "Actuation"),
+    // NMHS CDSS-HDA-004: international units and units of presentation reach the CDS dose-limit rule
+    INTERNATIONAL_UNITS_IU("International units", "IU"),
+    INTERNATIONAL_UNIT_IU("International unit", "IU"),
+    IU_IU("IU", "IU"),
+    UNIT_UNIT("Unit", "Unit");
 
     private static final Map<String, String> BY_UNIT = new HashMap<>();
     private static final Map<String, String> BY_UNIT_IGNORE_CASE = new HashMap<>();
@@ -46,6 +51,8 @@ public enum DosageUnitMapper {
         BY_UCUM.put("mL", "mL");
         BY_UCUM.put("L", "L");
         BY_UCUM.put("uL", "uL");
+        BY_UCUM.put("[iU]", "IU");
+        BY_UCUM.put("[IU]", "IU");
     }
 
     /** Unit name first (exact, then case-insensitive), then the UCUM code when the quantity carries one. */

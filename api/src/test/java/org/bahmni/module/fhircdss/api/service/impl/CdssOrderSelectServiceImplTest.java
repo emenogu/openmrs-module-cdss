@@ -77,6 +77,9 @@ public class CdssOrderSelectServiceImplTest {
     private MedicationRequestBuilder medicationRequestBuilder;
 
     @Mock
+    private BodyWeightRequestBuilder bodyWeightRequestBuilder;
+
+    @Mock
     private RestTemplate restTemplate;
 
     @Mock
@@ -107,6 +110,7 @@ public class CdssOrderSelectServiceImplTest {
         verify(patientRequestBuilder, times(1)).build(mockRequestBundle);
         verify(conditionsRequestBuilder, times(1)).build(mockRequestBundle);
         verify(medicationRequestBuilder, times(1)).build(mockRequestBundle);
+        verify(bodyWeightRequestBuilder, times(1)).build(mockRequestBundle);
         assertEquals(1, cdsAlerts.size());
     }
     @Test
